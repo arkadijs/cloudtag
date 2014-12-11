@@ -1,0 +1,14 @@
+[Unit]
+Description=Tag CoreOS AWS instance with unique Name and insert Route53 A record
+Documentation=https://github.com/arkadijs/cloudtag
+Requires=etcd.service
+After=etcd.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+TimeoutStartSec=90
+ExecStartPre=/bin/sh -c 'f=/opt/bin/cloudtag; test -x $f || wget -nv -O $f https://github.com/arkadijs/cloudtag/raw/master/bin/cloudtag.amd64 && chmod +x $f'
+ExecStart=/opt/bin/cloudtag -tag-prefix core- -stack-name deis-1 -dns-zone mycontainers.io -delay 30 -verbose
