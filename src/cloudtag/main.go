@@ -48,7 +48,7 @@ func main() {
 	if !strings.HasPrefix(etcdPrefix, "/") {
 		log.Fatal("etcd-prefix must start with `/`, got `%s`", etcdPrefix)
 	}
-	if !strings.HasSuffix(dnsZone, ".") {
+	if dnsZone != "" && !strings.HasSuffix(dnsZone, ".") {
 		dnsZone = dnsZone + "."
 	}
 
@@ -80,6 +80,10 @@ func main() {
 		log.Printf("machine id = %v", mid)
 		log.Printf("index = %d", index)
 		log.Printf("region = %v", region)
+		log.Printf("tag = %v", tagName)
+		log.Printf("prefix = %v", tagPrefix)
+		log.Printf("stack = %v", stackName)
+		log.Printf("dns zone = %v", dnsZone)
 	}
 
 	auth, err := aws.GetAuth("", "")
@@ -138,7 +142,7 @@ func findIndex(mid string) (index int, err error) {
 	for i := 1; i < maxMachineIndex; i++ {
 		maybe, err := get(i)
 		if err != nil {
-			return 0, nil
+			return 0, err
 		}
 		if verbose && maybe != "" {
 			log.Printf("index %d -> %v", i, maybe)
