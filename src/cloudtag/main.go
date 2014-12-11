@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 var (
@@ -85,11 +86,11 @@ func main() {
 		log.Fatal(err)
 	}
 	_region := aws.Regions[region]
-	if tagName != "" {
-		tag(ec2.New(auth, _region), instance, index)
-	}
 	if dnsZone != "" {
 		dns(r53.New(auth, _region), publicIp, index)
+	}
+	if tagName != "" {
+		tag(ec2.New(auth, _region), instance, index)
 	}
 }
 
@@ -279,9 +280,21 @@ func tag(ec2c *ec2.EC2, instance string, index int) {
 		_stack = stackName + "-"
 	}
 	value := fmt.Sprintf("%s%s%d", _stack, tagValuePrefix, index)
-	_, err := ec2c.CreateTags([]string{instance}, []ec2.Tag{ec2.Tag{Key: tagName, Value: value}})
-	if err != nil {
-		log.Fatal(err)
+	instances := []string{instance}
+	tags := []ec2.Tag{ec2.Tag{Key: tagName, Value: value}}
+	change := func() {
+		_, err := ec2c.CreateTags(instances, tags)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	change()
+	if delay > 0 {
+		if verbose {
+			log.Printf("sleeping for %d seconds", delay)
+		}
+		time.Sleep(time.Duration(int64(delay) * 1000000000))
+		change()
 	}
 }
 
