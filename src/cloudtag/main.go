@@ -17,17 +17,18 @@ import (
 )
 
 var (
-	etcdAddress    string
-	etcdPrefix     string
-	tagName        string
-	tagValuePrefix string
-	stackName      string
-	dnsZone        string
-	delay          int
-	verbose        bool
+	etcdAddress string
+	etcdPrefix  string
+	tagName     string
+	tagPrefix   string
+	stackName   string
+	dnsZone     string
+	delay       int
+	verbose     bool
 )
 
 const (
+	machineIdFile    = "/etc/machine-id"
 	maxMachineIndex  = 100
 	maxEtcdRedirects = 10
 )
@@ -98,29 +99,37 @@ func parseFlags() {
 	flag.StringVar(&etcdAddress, "etcd", "localhost:4001", "The ETCD endpoint")
 	flag.StringVar(&etcdPrefix, "etcd-prefix", "/cloudtag", "The directory in ETCD to use for machine index allocation")
 	flag.StringVar(&tagName, "tag-name", "Name", "The name of the AWS tag to set")
-	flag.StringVar(&tagValuePrefix, "tag-value-prefix", "machine-", "The prefix to which machine index will be appended")
+	flag.StringVar(&tagPrefix, "tag-prefix", "machine-", "The prefix to which machine index will be appended")
 	flag.StringVar(&stackName, "stack-name", "", "The name of the stack")
-	flag.StringVar(&dnsZone, "dns-zone", "", "The Route53 DNS zone to insert machine record into")
-	flag.IntVar(&delay, "delay", 0, "If >0 then the tag is set again after number of seconds to combat CloudFormation reseting the Name tag")
+	flag.StringVar(&dnsZone, "dns-zone", "", "The Route53 DNS zone to insert machine A record into")
+	flag.IntVar(&delay, "delay", 0, "When greater than zero then the instance tag is set again after the delay to combat CloudFormation reseting it")
 	flag.BoolVar(&verbose, "verbose", false, "Print debug if true")
 	flag.Usage = func() {
-		fmt.Fprint(os.Stderr, "Usage: cloudtag [-etcd host[:port]] [-etcd-prefix /cloudtag] [-tag-name Name] [-tag-value-prefix machine-] [-stack-name stack-123] [-dns-zone cloud.some] [-delay 0]\n")
-		fmt.Fprint(os.Stderr, "\tName tag = {stack-name-}{machine-}{index}\n")
-		fmt.Fprint(os.Stderr, "\tDNS name = {machine-}{index}{.stack-name}{.dns-zone}\n\n")
+		fmt.Fprint(os.Stderr,
+			`Usage: cloudtag [-etcd host[:port]] [-etcd-prefix /cloudtag] [-tag-name Name] [-tag-prefix machine-] [-stack-name coreos-1] [-dns-zone cloud.some] [-delay 0] [-verbose]
+    Name tag will be:     {stack-name-}{machine-}{index}
+    DNS A record will be: {machine-}{index}{.stack-name}{.dns-zone}
+Typical usage:
+    $ AWS_ACCESS_KEY=... AWS_SECRET_KEY=... ./cloudtag -tag-prefix core- -stack-name deis-1 -dns-zone mycontainers.io -delay 30
+    AWS creadentials are read from
+    * environment
+    * ~/.aws/credentials
+    * instance IAM role (http://169.254.169.254/latest/meta-data/iam/security-credentials/)
+Flags:
+`)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 }
 
 func machineId() (string, error) {
-	const path = "/etc/machine-id"
-	_id, err := ioutil.ReadFile(path)
+	_id, err := ioutil.ReadFile(machineIdFile)
 	if err != nil {
 		return "", err
 	}
 	id := strings.TrimSpace(string(_id))
 	if id == "" {
-		return "", errors.New("Empty machine id read from " + path)
+		return "", errors.New("Empty machine id read from " + machineIdFile)
 	}
 	return id, nil
 }
@@ -131,7 +140,7 @@ func findIndex(mid string) (index int, err error) {
 		if err != nil {
 			return 0, nil
 		}
-		if verbose {
+		if verbose && maybe != "" {
 			log.Printf("index %d -> %v", i, maybe)
 		}
 		if maybe == mid {
@@ -166,12 +175,12 @@ type EtcdOp struct {
 	Node   EtcdNode
 }
 
-func etcdUrl(etcdAddress string, etcdPrefix string, tagValuePrefix string, tagName string, index int) string {
-	return fmt.Sprintf("http://%s/v2/keys%s/%s%s/%d", etcdAddress, etcdPrefix, tagValuePrefix, tagName, index)
+func etcdUrl(etcdAddress string, etcdPrefix string, tagPrefix string, tagName string, index int) string {
+	return fmt.Sprintf("http://%s/v2/keys%s/%s%s/%d", etcdAddress, etcdPrefix, tagPrefix, tagName, index)
 }
 
 func get(index int) (id string, err error) {
-	url := etcdUrl(etcdAddress, etcdPrefix, tagValuePrefix, tagName, index)
+	url := etcdUrl(etcdAddress, etcdPrefix, tagPrefix, tagName, index)
 	if verbose {
 		log.Printf("getting %v", url)
 	}
@@ -208,7 +217,7 @@ func get(index int) (id string, err error) {
 }
 
 func put(mid string, index int) (ok bool, err error) {
-	url := etcdUrl(etcdAddress, etcdPrefix, tagValuePrefix, tagName, index) + "?prevExist=false"
+	url := etcdUrl(etcdAddress, etcdPrefix, tagPrefix, tagName, index) + "?prevExist=false"
 	if verbose {
 		log.Printf("putting %v", url)
 	}
@@ -279,7 +288,7 @@ func tag(ec2c *ec2.EC2, instance string, index int) {
 	if stackName != "" {
 		_stack = stackName + "-"
 	}
-	value := fmt.Sprintf("%s%s%d", _stack, tagValuePrefix, index)
+	value := fmt.Sprintf("%s%s%d", _stack, tagPrefix, index)
 	instances := []string{instance}
 	tags := []ec2.Tag{ec2.Tag{Key: tagName, Value: value}}
 	change := func() {
@@ -306,7 +315,7 @@ func dns(r53c *r53.Route53, publicIp string, index int) {
 	var zoneId string
 	for _, zone := range res.HostedZones { // hope the response is not truncated
 		if verbose {
-			log.Printf("DNS zone %v -> %v", zone.Name, zone.ID)
+			log.Printf("zone %v -> %v", zone.Name, zone.ID)
 		}
 		if zone.Name == dnsZone {
 			zoneId = zone.ID
@@ -321,9 +330,9 @@ func dns(r53c *r53.Route53, publicIp string, index int) {
 	if stackName != "" {
 		_stack = "." + stackName
 	}
-	record := fmt.Sprintf("%s%d%s.%s", tagValuePrefix, index, _stack, dnsZone)
-	_, err = r53c.ChangeResourceRecordSets(zoneId,
-		&r53.ChangeResourceRecordSetsRequest{Changes: []r53.Change{r53.Change{Action: "UPSERT", Record: r53.ResourceRecordSet{Name: record, Type: "A", TTL: 300, Records: []string{publicIp}}}}})
+	record := fmt.Sprintf("%s%d%s.%s", tagPrefix, index, _stack, dnsZone)
+	req := &r53.ChangeResourceRecordSetsRequest{Changes: []r53.Change{r53.Change{Action: "UPSERT", Record: r53.ResourceRecordSet{Name: record, Type: "A", TTL: 300, Records: []string{publicIp}}}}}
+	_, err = r53c.ChangeResourceRecordSets(zoneId, req)
 	if err != nil {
 		log.Fatal(err)
 	}
