@@ -115,7 +115,7 @@ func parseFlags() {
     DNS A record will be: {machine-}{index}{.stack-name}{.dns-zone}
 Typical usage:
     $ AWS_ACCESS_KEY=... AWS_SECRET_KEY=... ./cloudtag -tag-prefix core- -stack-name deis-1 -dns-zone mycontainers.io -delay 30
-    AWS creadentials are read from
+    AWS credentials are read from
     * environment
     * ~/.aws/credentials
     * instance IAM role (http://169.254.169.254/latest/meta-data/iam/security-credentials/)
