@@ -5,9 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/mitchellh/goamz/aws"
-	"github.com/mitchellh/goamz/ec2"
-	r53 "github.com/mitchellh/goamz/route53"
+	"github.com/goamz/goamz/aws"
+	"github.com/goamz/goamz/ec2"
+	r53 "github.com/goamz/goamz/route53"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -86,16 +86,19 @@ func main() {
 		log.Printf("dns zone = %v", dnsZone)
 	}
 
-	auth, err := aws.GetAuth("", "")
+	auth, err := aws.GetAuth("", "", "", time.Time{})
 	if err != nil {
 		log.Fatal(err)
 	}
-	_region := aws.Regions[region]
 	if dnsZone != "" {
-		dns(r53.New(auth, _region), publicIp, index)
+		route53, err := r53.NewRoute53(auth)
+		if err != nil {
+			log.Fatal(err)
+		}
+		dns(route53, publicIp, index)
 	}
 	if tagName != "" {
-		tag(ec2.New(auth, _region), instance, index)
+		tag(ec2.New(auth, aws.Regions[region]), instance, index)
 	}
 }
 
@@ -312,17 +315,17 @@ func tag(ec2c *ec2.EC2, instance string, index int) {
 }
 
 func dns(r53c *r53.Route53, publicIp string, index int) {
-	res, err := r53c.ListHostedZones("", 0)
+	res, err := r53c.ListHostedZones("", 1000)
 	if err != nil {
 		log.Fatal(err)
 	}
 	var zoneId string
 	for _, zone := range res.HostedZones { // hope the response is not truncated
 		if verbose {
-			log.Printf("zone %v -> %v", zone.Name, zone.ID)
+			log.Printf("zone %v -> %v", zone.Name, zone.Id)
 		}
 		if zone.Name == dnsZone {
-			zoneId = zone.ID
+			zoneId = zone.Id
 			break
 		}
 	}
@@ -335,8 +338,20 @@ func dns(r53c *r53.Route53, publicIp string, index int) {
 		_stack = "." + stackName
 	}
 	record := fmt.Sprintf("%s%d%s.%s", tagPrefix, index, _stack, dnsZone)
-	req := &r53.ChangeResourceRecordSetsRequest{Changes: []r53.Change{r53.Change{Action: "UPSERT", Record: r53.ResourceRecordSet{Name: record, Type: "A", TTL: 300, Records: []string{publicIp}}}}}
-	_, err = r53c.ChangeResourceRecordSets(zoneId, req)
+	req := &r53.ChangeResourceRecordSetsRequest{
+		Changes: []r53.ResourceRecordSet{
+			r53.Change{
+				Action: "UPSERT",
+				Name: record,
+				Type: "A",
+				TTL: 300,
+				Values: []r53.ResourceRecordValue{
+					r53.ResourceRecordValue{Value: publicIp},
+				},
+			},
+		},
+	}
+	_, err = r53c.ChangeResourceRecordSet(req, zoneId)
 	if err != nil {
 		log.Fatal(err)
 	}
