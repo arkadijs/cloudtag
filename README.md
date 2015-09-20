@@ -37,7 +37,7 @@ In case you do  not want to set the Name or DNS zone, supply empty string `""` t
 
 Cloudtag use [etcd] to grab an unique machine index. It meant to be used on [CoreOS] cluster and launched by `systemd` via `cloud-config.yml`.
 
-If you want to rebuild the binary, you must apply [Route53 auth fix] to `goamz/route53`. Also, cloudtag won't work in eu-central-1 and cn-north-1 until [v4 AWS signatures] are implemented in [goamz].
+If you want to rebuild the binary, please use [v4 Signature] enabled [goamz]. Else EC2 Name tagging won't work in eu-central-1 and cn-north-1 regions.
 
 #### Cloud authorization
 
@@ -88,6 +88,5 @@ For AWS authorization it is recommended to use machine [IAM role], for example:
 [cloudtag.service]: https://github.com/arkadijs/cloudtag/blob/master/cloudtag.service
 [etcd]: https://github.com/coreos/etcd
 [IAM role]: http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-iam-role.html#cfn-iam-role-templateexamples
-[Route53 auth fix]: https://github.com/creack/goamz/commit/0cdacde7a319612dbfe0d2bf6189e55d55d4ec65
-[v4 AWS signatures]: https://github.com/mitchellh/goamz/issues/120
-[goamz]: https://github.com/mitchellh/goamz/
+[v4 Signature]: https://github.com/mitchellh/goamz/pull/154
+[goamz]: https://github.com/ekle/goamz
